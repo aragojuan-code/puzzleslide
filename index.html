@@ -491,12 +491,19 @@ function setupMasterVideo(url){
 
 
 
-  function drawVideoTiles(){
-    if (drawingSuspended) return;
-    if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
+ function drawVideoTiles(){
+  if (drawingSuspended) return;
+  if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
 
-    const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
-    if(!vw || !vh) return;
+  // Boomerang dentro del bucle (evita depender de 'timeupdate')
+  if (masterVideo.currentTime >= BOOM_END - 0.02) {
+    try { masterVideo.currentTime = 0.01; } catch(e){}
+  }
+
+  const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
+  if(!vw || !vh) return;
+
+ 
 
     // Recorte cuadrado centrado
     const side = Math.min(vw, vh);
