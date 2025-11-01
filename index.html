@@ -69,7 +69,7 @@
     <div class="controls">
       <label for="fileInput" class="btn" id="loadBtn">Cargar foto</label>
       <button id="shuffleBtn" disabled>Mezclar</button>
-      <button id="resetBtn" disabled>Reiniciar</button>
+      <button id="showBtn" disabled>Mostrar</button>
       <input id="fileInput" type="file" accept="image/*">
     </div>
   </header>
@@ -107,6 +107,9 @@
   const fileInput = document.getElementById('fileInput');
   const shuffleBtn= document.getElementById('shuffleBtn');
   const resetBtn  = document.getElementById('resetBtn');
+  const showBtn = document.getElementById('showBtn');
+  let showing = false;
+  let savedPos = null;
 
   const neighbors = {
     0:[1,3], 1:[0,2,4], 2:[1,5],
@@ -114,6 +117,21 @@
     6:[3,7], 7:[4,6,8],
     8:[5,7,9], 9:[8]
   };
+  function showFullImage(){
+    if(!imageReady || showing) return;
+    savedPos = pos.slice();          // guarda el estado actual
+    showing = true;
+    // muestra imagen completa (sin huecos)
+    pos = [0,1,2,3,4,5,6,7,8,9].map((v,i)=> i<9 ? i : EMPTY); 
+    safeRender();
+  }
+  
+  function hideFullImage(){
+    if(!showing) return;
+    showing = false;
+    pos = savedPos.slice();          // recupera el puzzle original
+    safeRender();
+  }
 
   function render(){
     boardEl.innerHTML = '';
@@ -285,7 +303,7 @@ function shuffle(times = 160) {
       imgURL = await cropToSquare(file);
       imageReady = true;
       shuffleBtn.disabled = false;
-      resetBtn.disabled  = false;
+      showBtn.disabled  = false;
       pos = [0,1,2,3,4,5,6,7,8, EMPTY];
       moves = 0; movesEl.textContent = moves;
       safeRender(); checkWin();
@@ -295,6 +313,15 @@ function shuffle(times = 160) {
       statusEl.textContent = 'Error al cargar la imagen';
     }
   });
+  // Mostrar imagen final mientras se mantiene presionado
+  showBtn.addEventListener('mousedown', showFullImage);
+  showBtn.addEventListener('mouseup', hideFullImage);
+  showBtn.addEventListener('mouseleave', hideFullImage);
+  
+  // Para pantallas táctiles
+  showBtn.addEventListener('touchstart', e => { e.preventDefault(); showFullImage(); });
+  showBtn.addEventListener('touchend', hideFullImage);
+  showBtn.addEventListener('touchcancel', hideFullImage);
 
   document.getElementById('shuffleBtn').addEventListener('click', ()=>shuffle(140));
   document.getElementById('resetBtn').addEventListener('click', ()=>{
