@@ -123,14 +123,18 @@
   let mediaURL = null;
   let mediaType = null;   // 'image' | 'video'
   let ready = false;
+  let drawingSuspended = false;
 
   // --- VIDEO: maestro + canvas + boomerang optimizado ---
   const vCanvas = document.getElementById('videoCanvas');
   const vctx = vCanvas.getContext('2d');
+  
   // buffer de baja resolución para abaratar el blit (ajustable 480–720)
   const srcCanvas = document.createElement('canvas');
   const sctx = srcCanvas.getContext('2d', { willReadFrequently: true });
   const SRC_SIZE = 640;
+  const backCanvas = document.createElement('canvas');
+  const bctx = backCanvas.getContext('2d');
 
   let masterVideo = null;
   const BOOM_END = 3;                // segundos (longitud del boomerang)
@@ -167,19 +171,47 @@
     dockEl.style.height = r.height + 'px';
   }
 
-  function computeLayout(){
-    const dpr = window.devicePixelRatio || 1;
-    const rB  = boardEl.getBoundingClientRect();
-    const cellEls = [...boardEl.querySelectorAll('.cell')].slice(0,9);
-    const cells = cellEls.map(el=>{
-      const r = el.getBoundingClientRect();
-      return {
-        x: Math.round((r.left - rB.left) * dpr),
-        y: Math.round((r.top  - rB.top ) * dpr),
-        w: Math.round(r.width  * dpr),
-        h: Math.round(r.height * dpr),
-      };
-    });
+ function computeLayout(){
+  const dpr = window.devicePixelRatio || 1;
+
+  // Rect del tablero (referencia)
+  const rB = boardEl.getBoundingClientRect();
+
+  // Medidas actuales del canvas objetivo (en px del dispositivo)
+  const newW = Math.max(1, Math.round(rB.width  * dpr));
+  const newH = Math.max(1, Math.round(rB.height * dpr));
+
+  // ⚠️ Solo redimensiona si cambió (evita limpiar el canvas en cada render)
+  if (vCanvas.width !== newW || vCanvas.height !== newH) {
+    vCanvas.width  = newW;
+    vCanvas.height = newH;
+  }
+
+  // Cachea posiciones de las 9 celdas
+  const cellEls = [...boardEl.querySelectorAll('.cell')].slice(0, 9);
+  const cells = cellEls.map(el => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.round((r.left - rB.left) * dpr),
+      y: Math.round((r.top  - rB.top ) * dpr),
+      w: Math.round(r.width  * dpr),
+      h: Math.round(r.height * dpr),
+    };
+  });
+
+  // Cachea posición del muelle (casilla #10)
+  const rd = dockEl.getBoundingClientRect();
+  const dock = {
+    x: Math.round((rd.left - rB.left) * dpr),
+    y: Math.round((rd.top  - rB.top ) * dpr),
+    w: Math.round(rd.width  * dpr),
+    h: Math.round(rd.height * dpr),
+  };
+
+  // Guarda el layout cacheado
+  layout = { dpr, cells, dock };
+}
+
     const rd = dockEl.getBoundingClientRect();
     const dock = {
       x: Math.round((rd.left - rB.left) * dpr),
@@ -193,16 +225,18 @@
     layout = { dpr, cells, dock };
   }
 
-  function safeRender(){ render(); sizeDockToCell(); computeLayout(); }
+ function safeRender(){
+  drawingSuspended = true;
+  render();
+  sizeDockToCell();
+  computeLayout();
+  // reanudar y pintar una vez, sincronizado con el siguiente frame
+  requestAnimationFrame(()=>{
+    drawingSuspended = false;
+    if (mediaType === 'video') drawVideoTiles();
+  });
+}
 
-  /* ---------- IMAGEN de fondo por celda ---------- */
-  function cellBackground(el, indexValue){
-    const cx = indexValue % 3, cy = Math.floor(indexValue/3);
-    const px = cx===0? '0%' : (cx===1? '50%' : '100%');
-    const py = cy===0? '0%' : (cy===1? '50%' : '100%');
-    el.style.backgroundImage = `url(${mediaURL})`;
-    el.style.backgroundPosition = `${px} ${py}`;
-  }
 
   /* ---------- Render tablero (DOM) ---------- */
   function render(){
@@ -398,6 +432,7 @@
   }
 
   function drawVideoTiles(){
+      if (drawingSuspended) return;
     if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
 
     const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
@@ -412,10 +447,26 @@
     srcCanvas.width = SRC_SIZE; srcCanvas.height = SRC_SIZE;
     sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
 
-    // Pintamos en el canvas de destino
-    vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+ // preparar backbuffer
+backCanvas.width  = vCanvas.width;
+backCanvas.height = vCanvas.height;
 
-    const ts = SRC_SIZE / 3;
+// limpiar y dibujar todo en backbuffer
+bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
+
+// --- (usa bctx en lugar de vctx en las dos zonas de pintado) ---
+const ts = SRC_SIZE / 3;
+// 9 celdas
+...
+bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+// muelle
+...
+bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+
+// swap atómico: copiar backbuffer -> visible de una sola vez
+vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+vctx.drawImage(backCanvas, 0, 0);
+
 
     // 9 celdas
     for (let i=0;i<9;i++){
