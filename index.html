@@ -48,16 +48,21 @@
 
   /* Muelle (casilla #10) bajo la esquina inferior derecha.
      Igual tamaño que una celda: (ancho total - padding*2 - gaps*2)/3  */
-  .dock-wrap{ position:relative; height: calc((100% - (var(--gap)*2)) / 3 + 12px); margin-top:12px }
-  .dock{
-    position:absolute; right:0;
-    width: calc((100% - (var(--gap)*2)) / 3);
-    height: calc((100% - (var(--gap)*2)) / 3);
-    border-radius:12px; border:1px solid rgba(255,255,255,.08);
-    background:linear-gradient(180deg,#0b1118,#0e1722);
-    display:flex; align-items:center; justify-content:center;
-  }
-  .dock .cell{ width:100%; height:100%; border:none; border-radius:12px }
+  /* Dock (muelle) debajo a la derecha */
+.dock-wrap{
+  display:flex;
+  justify-content:flex-end;
+  margin-top:12px;
+}
+.dock{
+  position:relative;            /* ya no absoluto */
+  width:120px; height:120px;    /* lo ajustaremos por JS al tamaño exacto */
+  border-radius:12px; border:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(180deg,#0b1118,#0e1722);
+  display:flex; align-items:center; justify-content:center;
+}
+.dock .cell{ width:100%; height:100%; border:none; border-radius:12px }
+
 
   .info{display:flex;gap:8px;flex-wrap:wrap}
   .pill{padding:6px 10px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(255,255,255,.05);font-size:14px;color:var(--muted)}
@@ -164,6 +169,20 @@
     dockCell.addEventListener('click', ()=> trySlide(9));
     dockEl.appendChild(dockCell);
   }
+function sizeDockToCell(){
+  const firstCell = boardEl.querySelector('.cell');
+  if(!firstCell) return;
+  const s = firstCell.getBoundingClientRect().width;
+  dockEl.style.width = s + 'px';
+  dockEl.style.height = s + 'px';
+}
+
+function safeRender(){
+  render();
+  sizeDockToCell();
+}
+
+// Sustituye todas las llamadas a `render()` por `safeRender()`
 
   function trySlide(fromPos){
     if(!imageReady) return;
@@ -175,7 +194,7 @@
     setTimeout(()=>cells[idx].classList.remove('flash'), 120);
     [pos[fromPos], pos[emptyPos]] = [pos[emptyPos], pos[fromPos]];
     moves++; movesEl.textContent = moves;
-    render(); checkWin();
+    safeRender(); checkWin();
   }
 
   function isSolved(){
@@ -203,7 +222,7 @@
       last = e;
     }
     moves=0; movesEl.textContent=moves;
-    render(); checkWin();
+    safeRender(); checkWin();
   }
 
   // Recorta al centro (cuadrado)
@@ -239,7 +258,7 @@
       resetBtn.disabled  = false;
       pos = [0,1,2,3,4,5,6,7,8, EMPTY];
       moves = 0; movesEl.textContent = moves;
-      render(); checkWin();
+      safeRender(); checkWin();
       shuffle(160);
     }catch(err){
       console.error(err);
@@ -254,6 +273,8 @@
   });
 
   render(); // cuadrícula vacía inicial
+  window.addEventListener('resize', sizeDockToCell);
+
 </script>
 </body>
 </html>
