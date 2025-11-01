@@ -134,6 +134,15 @@
   height: auto;          /* lo fija el aspect-ratio */
 }
 
+/* Tu glow normal */
+.cell.movable{
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+
+/* Silenciar el glow mientras se anima (evita fantasmas) */
+.cell.animating{
+  box-shadow: none !important;
+}
 
 </style>
 </head>
@@ -391,29 +400,41 @@ function drawHighlights(){
   }
 
   /* ---------- Animación de deslizamiento ---------- */
-  function animateSlide(fromPos, toPos, onDone){
-    const cells = boardEl.querySelectorAll('.cell');
-    const originEl = (fromPos===9)? dockEl.querySelector('.cell') : cells[fromPos];
-    const targetEl = (toPos===9)? dockEl.querySelector('.cell') : cells[toPos];
-    if(!originEl || !targetEl){ onDone(); return; }
+ function animateSlide(fromPos, toPos, onDone){
+  const cells   = boardEl.querySelectorAll('.cell');
+  const origin  = (fromPos===9)? dockEl.querySelector('.cell') : cells[fromPos];
+  const target  = (toPos===9)?   dockEl.querySelector('.cell') : cells[toPos];
+  if(!origin || !target){ onDone(); return; }
 
-    const o = originEl.getBoundingClientRect();
-    const t = targetEl.getBoundingClientRect();
-    const dx = t.left - o.left;
-    const dy = t.top  - o.top;
+  // 1) Quitar los “movable” actuales para evitar duplicados visuales
+  boardEl.querySelectorAll('.cell.movable').forEach(el=>el.classList.remove('movable'));
+  // 2) Silenciar el glow en los dos implicados durante la animación
+  origin.classList.add('animating');
+  target.classList.add('animating');
 
-    originEl.style.transition = 'transform .12s ease-out';
-    originEl.style.transform = `translate(${dx}px, ${dy}px)`;
-    requestAnimationFrame(()=>{
-      setTimeout(()=>{
-        originEl.style.transition=''; originEl.style.transform='';
-        onDone();
-        computeLayout();
-        if (mediaType === 'video') drawVideoTiles(); // refrescar dockCanvas
-        drawHighlights();
-      },130);
-    });
-  }
+  const o = origin.getBoundingClientRect();
+  const t = target.getBoundingClientRect();
+  const dx = t.left - o.left, dy = t.top - o.top;
+
+  origin.style.transition = 'transform .12s ease-out';
+  origin.style.transform  = `translate(${dx}px, ${dy}px)`;
+
+  requestAnimationFrame(()=>{
+    setTimeout(()=>{
+      // limpiar estilos temporales
+      origin.style.transition = '';
+      origin.style.transform  = '';
+      origin.classList.remove('animating');
+      target.classList.remove('animating');
+
+      onDone();
+      // Recalcula layout y re-render: aquí se vuelven a marcar los nuevos “movable”
+      computeLayout();
+      if (mediaType === 'video') drawVideoTiles();
+    },130);
+  });
+}
+
 
   function trySlide(fromPos){
     if(!ready || showing) return;
