@@ -60,6 +60,7 @@
     background:linear-gradient(180deg,#0b1118,#0e1722);
     display:flex; align-items:center; justify-content:center;
     overflow:hidden;
+    width:140px; height:140px; /* tamaño inicial hasta que haya celdas para copiar tamaño */
   }
   .dock .cell{ width:100%; height:100%; border:none; border-radius:var(--radius-cell) }
 
@@ -128,20 +129,21 @@
   // --- VIDEO: maestro + canvas + boomerang optimizado ---
   const vCanvas = document.getElementById('videoCanvas');
   const vctx = vCanvas.getContext('2d');
-  
+
   // buffer de baja resolución para abaratar el blit (ajustable 480–720)
   const srcCanvas = document.createElement('canvas');
   const sctx = srcCanvas.getContext('2d', { willReadFrequently: true });
   const SRC_SIZE = 640;
+
+  // backbuffer (swap atómico)
   const backCanvas = document.createElement('canvas');
   const bctx = backCanvas.getContext('2d');
 
   let masterVideo = null;
-  const BOOM_END = 3;                // segundos (longitud del boomerang)
+  const BOOM_END = 3; // segundos (longitud del boomerang)
   let rafId = null;
-  let lastDraw = 0;
 
-  // layout cacheado (no medimos en cada frame)
+  // layout cacheado
   let layout = null; // {dpr, cells:[{x,y,w,h}×9], dock:{x,y,w,h}}
 
   const boardEl   = document.getElementById('board');
@@ -162,56 +164,55 @@
     8:[5,7,9], 9:[8]
   };
 
-  /* ---------- Layout y tamaños ---------- */
+  /* ---------- Util: fondo para celdas (imagen) ---------- */
+  function cellBackground(el, val){
+    // val = índice 0..8 de la grilla original 3x3
+    const col = val % 3;         // 0,1,2
+    const row = (val / 3) | 0;   // 0,1,2
+    // Con background-size: 300% 300%, las posiciones son 0%, 50%, 100%
+    const px = col === 0 ? '0%' : (col === 1 ? '50%' : '100%');
+    const py = row === 0 ? '0%' : (row === 1 ? '50%' : '100%');
+    el.style.backgroundImage = `url('${mediaURL}')`;
+    el.style.backgroundPosition = `${px} ${py}`;
+    el.style.backgroundColor = ''; // quitar placeholder
+    el.style.outline = '';
+  }
+
+  /* ---------- Layout y tamaños (DPR aware) ---------- */
   function sizeDockToCell(){
     const firstCell = boardEl.querySelector('.cell');
     if(!firstCell) return;
     const r = firstCell.getBoundingClientRect();
+    // deja márgenes redondeados similares
     dockEl.style.width  = r.width  + 'px';
     dockEl.style.height = r.height + 'px';
   }
 
- function computeLayout(){
-  const dpr = window.devicePixelRatio || 1;
+  function computeLayout(){
+    const dpr = window.devicePixelRatio || 1;
+    const rB = boardEl.getBoundingClientRect();
 
-  // Rect del tablero (referencia)
-  const rB = boardEl.getBoundingClientRect();
+    // redimensiona el canvas visible solo si cambió
+    const newW = Math.max(1, Math.round(rB.width  * dpr));
+    const newH = Math.max(1, Math.round(rB.height * dpr));
+    if (vCanvas.width !== newW || vCanvas.height !== newH) {
+      vCanvas.width  = newW;
+      vCanvas.height = newH;
+    }
 
-  // Medidas actuales del canvas objetivo (en px del dispositivo)
-  const newW = Math.max(1, Math.round(rB.width  * dpr));
-  const newH = Math.max(1, Math.round(rB.height * dpr));
+    // cachea posiciones de las 9 celdas
+    const cellEls = [...boardEl.querySelectorAll('.cell')].slice(0, 9);
+    const cells = cellEls.map(el => {
+      const r = el.getBoundingClientRect();
+      return {
+        x: Math.round((r.left - rB.left) * dpr),
+        y: Math.round((r.top  - rB.top ) * dpr),
+        w: Math.round(r.width  * dpr),
+        h: Math.round(r.height * dpr),
+      };
+    });
 
-  // ⚠️ Solo redimensiona si cambió (evita limpiar el canvas en cada render)
-  if (vCanvas.width !== newW || vCanvas.height !== newH) {
-    vCanvas.width  = newW;
-    vCanvas.height = newH;
-  }
-
-  // Cachea posiciones de las 9 celdas
-  const cellEls = [...boardEl.querySelectorAll('.cell')].slice(0, 9);
-  const cells = cellEls.map(el => {
-    const r = el.getBoundingClientRect();
-    return {
-      x: Math.round((r.left - rB.left) * dpr),
-      y: Math.round((r.top  - rB.top ) * dpr),
-      w: Math.round(r.width  * dpr),
-      h: Math.round(r.height * dpr),
-    };
-  });
-
-  // Cachea posición del muelle (casilla #10)
-  const rd = dockEl.getBoundingClientRect();
-  const dock = {
-    x: Math.round((rd.left - rB.left) * dpr),
-    y: Math.round((rd.top  - rB.top ) * dpr),
-    w: Math.round(rd.width  * dpr),
-    h: Math.round(rd.height * dpr),
-  };
-
-  // Guarda el layout cacheado
-  layout = { dpr, cells, dock };
-}
-
+    // cachea posición del muelle
     const rd = dockEl.getBoundingClientRect();
     const dock = {
       x: Math.round((rd.left - rB.left) * dpr),
@@ -219,24 +220,20 @@
       w: Math.round(rd.width  * dpr),
       h: Math.round(rd.height * dpr),
     };
-    // redimensiona el canvas al tablero
-    vCanvas.width  = Math.max(1, Math.round(rB.width  * dpr));
-    vCanvas.height = Math.max(1, Math.round(rB.height * dpr));
+
     layout = { dpr, cells, dock };
-  };
+  }
 
- function safeRender(){
-  drawingSuspended = true;
-  render();
-  sizeDockToCell();
-  computeLayout();
-  // reanudar y pintar una vez, sincronizado con el siguiente frame
-  requestAnimationFrame(()=>{
-    drawingSuspended = false;
-    if (mediaType === 'video') drawVideoTiles();
-  });
-}
-
+  function safeRender(){
+    drawingSuspended = true;
+    render();
+    sizeDockToCell();
+    computeLayout();
+    requestAnimationFrame(()=>{
+      drawingSuspended = false;
+      if (mediaType === 'video') drawVideoTiles();
+    });
+  }
 
   /* ---------- Render tablero (DOM) ---------- */
   function render(){
@@ -300,8 +297,7 @@
       setTimeout(()=>{
         originEl.style.transition=''; originEl.style.transform='';
         onDone();
-        // tras reordenar, el layout cambia
-        computeLayout();
+        computeLayout(); // el layout cambia tras reordenar
       },130);
     });
   }
@@ -401,13 +397,17 @@
     });
   }
 
-  /* ---------- Vídeo (1 <video> + canvas, boomerang sin seek) ---------- */
+  /* ---------- Vídeo (1 <video> + canvas, boomerang sin seek visible) ---------- */
   function setupMasterVideo(url){
-    if (masterVideo) { cancelAnimationFrame(rafId); masterVideo.pause(); masterVideo.remove(); }
+    if (masterVideo) {
+      cancelAnimationFrame(rafId);
+      masterVideo.pause();
+      masterVideo.remove();
+    }
     masterVideo = document.createElement('video');
     masterVideo.src = url;
     masterVideo.muted = true; masterVideo.playsInline = true; masterVideo.preload = 'auto';
-    masterVideo.loop = true;                       // siempre hacia delante
+    masterVideo.loop = true; // siempre hacia delante
     masterVideo.style.display = 'none';
     document.body.appendChild(masterVideo);
 
@@ -432,7 +432,7 @@
   }
 
   function drawVideoTiles(){
-      if (drawingSuspended) return;
+    if (drawingSuspended) return;
     if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
 
     const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
@@ -447,26 +447,14 @@
     srcCanvas.width = SRC_SIZE; srcCanvas.height = SRC_SIZE;
     sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
 
- // preparar backbuffer
-backCanvas.width  = vCanvas.width;
-backCanvas.height = vCanvas.height;
+    // preparar backbuffer al tamaño del canvas visible
+    backCanvas.width  = vCanvas.width;
+    backCanvas.height = vCanvas.height;
 
-// limpiar y dibujar todo en backbuffer
-bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
+    // limpiar backbuffer
+    bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
 
-// --- (usa bctx en lugar de vctx en las dos zonas de pintado) ---
-const ts = SRC_SIZE / 3;
-// 9 celdas
-...
-bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
-// muelle
-...
-bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
-
-// swap atómico: copiar backbuffer -> visible de una sola vez
-vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
-vctx.drawImage(backCanvas, 0, 0);
-
+    const ts = SRC_SIZE / 3; // tamaño de cada tile de origen
 
     // 9 celdas
     for (let i=0;i<9;i++){
@@ -474,22 +462,31 @@ vctx.drawImage(backCanvas, 0, 0);
       if (val === EMPTY) continue;
       const {x,y,w,h} = layout.cells[i];
       const cx = val % 3, cy = (val/3)|0;
-      vctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+      bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
     }
 
-    // muelle
+    // muelle (casilla #10)
     const v9 = pos[9];
     if (v9 !== EMPTY){
       const {x,y,w,h} = layout.dock;
       const cx = v9 % 3, cy = (v9/3)|0;
-      vctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+      bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
     }
+
+    // swap atómico: copiar backbuffer -> visible una sola vez
+    vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+    vctx.drawImage(backCanvas, 0, 0);
   }
 
   /* ---------- Carga archivo ---------- */
   fileInput.addEventListener('change', async (e)=>{
     const file = e.target.files?.[0]; if(!file) return;
     try{
+      if (mediaType === 'video' && mediaURL) {
+        // liberar el anterior URL object si era vídeo
+        URL.revokeObjectURL(mediaURL);
+      }
+
       if (file.type.startsWith('video/')){
         mediaType = 'video';
         mediaURL = URL.createObjectURL(file);
@@ -509,7 +506,10 @@ vctx.drawImage(backCanvas, 0, 0);
   });
 
   /* ---------- Controles ---------- */
-  document.getElementById('shuffleBtn').addEventListener('click', ()=>{ shuffle(140); if(mediaType==='video') drawVideoTiles(); });
+  document.getElementById('shuffleBtn').addEventListener('click', ()=>{
+    shuffle(140);
+    if(mediaType==='video') drawVideoTiles();
+  });
 
   function showFullImage(){
     if(!ready || showing) return;
