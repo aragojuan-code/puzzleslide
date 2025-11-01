@@ -97,6 +97,7 @@
     background:rgba(0,0,0,.35); backdrop-filter:blur(6px);
     border:1px solid rgba(255,255,255,.18);
     font-weight:700; opacity:0; pointer-events:none; transition:opacity .25s ease;
+    z-index: 10; /* ⬅️ por encima de videoCanvas (2) y fxCanvas (3) */
   }
   .toast.show{ opacity:1 }
   .cell.movable {
