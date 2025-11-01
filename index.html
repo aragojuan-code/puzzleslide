@@ -549,6 +549,12 @@
     computeLayout();
     if(mediaType==='video') drawVideoTiles();
   });
+  // ✅ Nueva mejora: pausa y reanuda el video cuando se oculta o vuelve la pestaña
+document.addEventListener('visibilitychange', ()=>{
+  if (!masterVideo) return;
+  if (document.hidden) masterVideo.pause();
+  else masterVideo.play().catch(()=>{});
+});
 </script>
 </body>
 </html>
