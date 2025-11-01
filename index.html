@@ -177,7 +177,14 @@
     6:[3,7], 7:[4,6,8],
     8:[5,7,9], 9:[8]
   };
+// arriba (constantes)
+const BOOM_END = 3;
+const FADE_MS = 250;
 
+// buffers
+const headCanvas = document.createElement('canvas');
+const hctx = headCanvas.getContext('2d');
+  let headReady = false;
   function cellBackground(el, val){
     const col = val % 3;
     const row = (val / 3) | 0;
@@ -418,112 +425,146 @@
   }
 
   /* ---------- Vídeo ---------- */
-  function setupMasterVideo(url){
-    if (masterVideo) {
-      cancelAnimationFrame(rafId);
-      masterVideo.pause();
-      masterVideo.remove();
-    }
-    masterVideo = document.createElement('video');
-    masterVideo.src = url;
-    masterVideo.muted = true; masterVideo.playsInline = true; masterVideo.preload = 'auto';
-    masterVideo.loop = true;
-    masterVideo.style.display = 'none';
-    document.body.appendChild(masterVideo);
+ function setupMasterVideo(url){
+  if (masterVideo) {
+    cancelAnimationFrame(rafId);
+    masterVideo.pause();
+    masterVideo.remove();
+  }
 
-    masterVideo.addEventListener('timeupdate', ()=>{
-      if (masterVideo.currentTime >= BOOM_END - 0.02) masterVideo.currentTime = 0.01;
-    });
+  masterVideo = document.createElement('video');
+  masterVideo.src = url;
+  masterVideo.muted = true;
+  masterVideo.playsInline = true;
+  masterVideo.preload = 'auto';
+  masterVideo.loop = true; // seguimos en forward; el crossfade camufla el salto
+  masterVideo.style.display = 'none';
+  document.body.appendChild(masterVideo);
 
-    masterVideo.addEventListener('loadedmetadata', ()=>{
-      masterVideo.currentTime = 0.01;
-      masterVideo.play().catch(()=>{});
+  // cuando se acerca al final del tramo, saltamos al inicio
+  masterVideo.addEventListener('timeupdate', ()=>{
+    if (masterVideo.currentTime >= BOOM_END - 0.02) masterVideo.currentTime = 0.01;
+  });
 
-      if ('requestVideoFrameCallback' in masterVideo){
+  masterVideo.addEventListener('loadedmetadata', ()=>{
+    // preparar lienzo del frame inicial al mismo tamaño reducido que srcCanvas
+    headCanvas.width  = SRC_SIZE;
+    headCanvas.height = SRC_SIZE;
+    headReady = false;
+
+    // posicionarnos al inicio para capturar el "head frame"
+    masterVideo.pause();
+    masterVideo.currentTime = 0.01; // fotograma limpio del inicio
+
+    const captureHead = ()=>{
+      const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
+      if (!vw || !vh) return;
+      const side = Math.min(vw, vh);
+      const sx0 = ((vw - side) / 2) | 0;
+      const sy0 = ((vh - side) / 2) | 0;
+      // volcamos el recorte cuadrado al headCanvas con la misma escala que srcCanvas
+      hctx.clearRect(0,0,headCanvas.width,headCanvas.height);
+      hctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
+      headReady = true;
+    };
+
+    // Captura robusta del frame de inicio:
+    if ('requestVideoFrameCallback' in masterVideo){
+      const once = ()=>{
+        captureHead();
+        // arrancamos reproducción y bucle de dibujo
+        masterVideo.play().catch(()=>{});
         const step = ()=>{ drawVideoTiles(); masterVideo.requestVideoFrameCallback(step); };
         masterVideo.requestVideoFrameCallback(step);
-      } else {
+      };
+      masterVideo.addEventListener('seeked', once, { once:true });
+    } else {
+      const once = ()=>{
+        captureHead();
+        masterVideo.play().catch(()=>{});
+        // fallback ~30fps
         let last=0;
         const loop = (t)=>{ if (t-last>33) { drawVideoTiles(); last=t; } rafId = requestAnimationFrame(loop); };
         rafId = requestAnimationFrame(loop);
-      }
-    });
+      };
+      masterVideo.addEventListener('seeked', once, { once:true });
+    }
+  });
+}
+
+
+ function drawVideoTiles(){
+  if (drawingSuspended) return;
+  if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
+
+  const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
+  if(!vw || !vh) return;
+
+  // --- recorte cuadrado centrado del vídeo ---
+  const side = Math.min(vw, vh);
+  const sx0 = ((vw - side) / 2) | 0;
+  const sy0 = ((vh - side) / 2) | 0;
+
+  // --- volcar frame actual a buffer reducido ---
+  srcCanvas.width = SRC_SIZE;
+  srcCanvas.height = SRC_SIZE;
+  sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
+
+  // --- preparar backbuffer del tablero ---
+  backCanvas.width  = vCanvas.width;
+  backCanvas.height = vCanvas.height;
+  bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
+
+  const ts = SRC_SIZE / 3;
+
+  // --- pintar 9 celdas del tablero con el frame actual ---
+  for (let i=0;i<9;i++){
+    const val = pos[i];
+    if (val === EMPTY) continue;
+    const {x,y,w,h} = layout.cells[i];
+    const cx = val % 3, cy = (val/3)|0;
+    bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
   }
 
-  function drawVideoTiles(){
-    if (drawingSuspended) return;
-    if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
-
-    const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
-    if(!vw || !vh) return;
-
-    // recorte cuadrado centrado
-    const side = Math.min(vw, vh);
-    const sx0 = ((vw - side) / 2) | 0;
-    const sy0 = ((vh - side) / 2) | 0;
-
-    // buffer reducido
-    srcCanvas.width = SRC_SIZE; srcCanvas.height = SRC_SIZE;
-    sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
-
-    // backbuffer tablero
-    backCanvas.width  = vCanvas.width;
-    backCanvas.height = vCanvas.height;
-    bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
-
-    const ts = SRC_SIZE / 3;
-
-    // 9 celdas (tablero)
+  // --- CROSSFADE: si estamos al final del tramo, mezclar el frame del inicio encima ---
+  const t = masterVideo.currentTime;
+  if (headReady && t >= BOOM_END - FADE_MS/1000) {
+    const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
+    bctx.save();
+    bctx.globalAlpha = alpha;
     for (let i=0;i<9;i++){
       const val = pos[i];
       if (val === EMPTY) continue;
       const {x,y,w,h} = layout.cells[i];
       const cx = val % 3, cy = (val/3)|0;
-      bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+      bctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
     }
-
-    // copiar backbuffer al canvas visible del tablero
-    vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
-    vctx.drawImage(backCanvas, 0, 0);
-
-    // muelle (casilla 10): se pinta en su canvas dedicado
-    dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
-    const v9 = pos[9];
-    if (v9 !== EMPTY){
-      const cx = v9 % 3, cy = (v9/3)|0;
-      dctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
-    }
+    bctx.restore();
   }
 
-  /* ---------- Carga archivo ---------- */
-  fileInput.addEventListener('change', async (e)=>{
-    const file = e.target.files?.[0]; if(!file) return;
-    try{
-      if (mediaType === 'video' && mediaURL) URL.revokeObjectURL(mediaURL);
+  // --- copiar backbuffer al canvas visible del tablero ---
+  vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+  vctx.drawImage(backCanvas, 0, 0);
 
-      if (file.type.startsWith('video/')){
-        mediaType = 'video';
-        mediaURL = URL.createObjectURL(file);
-        setupMasterVideo(mediaURL);
-      } else {
-        mediaType = 'image';
-        mediaURL = await loadImage(file);
-      }
-      ready = true;
-      shuffleBtn.disabled = false;
-      showBtn.disabled    = false;
-      pos = [0,1,2,3,4,5,6,7,8, EMPTY];
-      moves = 0; movesEl.textContent = moves;
-      safeRender(); shuffle(160);
-      if (mediaType === 'video') drawVideoTiles();
-    }catch(err){ console.error(err); }
-  });
+  // --- muelle (casilla 10) en su canvas dedicado ---
+  dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
+  const v9 = pos[9];
+  if (v9 !== EMPTY){
+    const cx = v9 % 3, cy = (v9/3)|0;
+    // frame actual
+    dctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
 
-  /* ---------- Controles ---------- */
-  document.getElementById('shuffleBtn').addEventListener('click', ()=>{
-    shuffle(140);
-    if(mediaType==='video') drawVideoTiles();
-  });
+    // crossfade en el muelle también
+    if (headReady && t >= BOOM_END - FADE_MS/1000) {
+      const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
+      dctx.save();
+      dctx.globalAlpha = alpha;
+      dctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
+      dctx.restore();
+    }
+  }
+}
+
 
   function showFullImage(){
     if(!ready || showing) return;
