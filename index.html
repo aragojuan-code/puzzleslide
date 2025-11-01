@@ -35,7 +35,7 @@
   }
   .cell{
     border-radius:12px; border:1px solid rgba(255,255,255,.08);
-    background:var(--tile); background-repeat:no-repeat; background-size:300% 300%;
+    background:var(--tile); background-repeat:no-repeat; background-size:100% 100%;image-rendering:crisp-edges;will-change:transform;
     transition:box-shadow .12s ease, background-color .12s ease;
     display:flex; align-items:center; justify-content:center;
     touch-action:none; /* para gestos sin scroll en móvil */
@@ -194,33 +194,29 @@
   function safeRender(){ render(); sizeDockToCell(); }
 
   // Animación de deslizamiento: crea un "ghost" que viaja del origen al hueco
-  function animateSlide(fromPos, toPos, onDone){
-    const cells = boardEl.querySelectorAll('.cell');
-    const isFromDock = fromPos === 9;
-    const originEl = isFromDock ? dockEl.querySelector('.cell') : cells[fromPos];
-    const targetEl = (toPos===9) ? dockEl.querySelector('.cell') : (toPos<9 ? cells[toPos] : null);
-    if(!originEl || !targetEl){ onDone(); return; }
+ function animateSlide(fromPos, toPos, onDone){
+  const cells = boardEl.querySelectorAll('.cell');
+  const originEl = (fromPos===9)? dockEl.querySelector('.cell') : cells[fromPos];
+  const targetEl = (toPos===9)? dockEl.querySelector('.cell') : cells[toPos];
+  if(!originEl || !targetEl){ onDone(); return; }
 
-    const bWrap = boardEl.getBoundingClientRect();
-    const o = originEl.getBoundingClientRect();
-    const t = targetEl.getBoundingClientRect();
+  const o = originEl.getBoundingClientRect();
+  const t = targetEl.getBoundingClientRect();
+  const dx = t.left - o.left;
+  const dy = t.top  - o.top;
 
-    const ghost = originEl.cloneNode(true);
-    ghost.style.position='fixed';
-    ghost.style.left=o.left+'px'; ghost.style.top=o.top+'px';
-    ghost.style.width=o.width+'px'; ghost.style.height=o.height+'px';
-    ghost.style.transition='transform .12s ease-out';
-    ghost.style.zIndex='10';
-    document.body.appendChild(ghost);
+  originEl.style.transition = 'transform .12s ease-out';
+  originEl.style.transform = `translate(${dx}px, ${dy}px)`;
 
-    const dx = t.left - o.left;
-    const dy = t.top  - o.top;
+  requestAnimationFrame(()=>{
+    setTimeout(()=>{
+      originEl.style.transition='';
+      originEl.style.transform='';
+      onDone();
+    },130);
+  });
+}
 
-    requestAnimationFrame(()=>{
-      ghost.style.transform=`translate(${dx}px, ${dy}px)`;
-      setTimeout(()=>{ document.body.removeChild(ghost); onDone(); }, 140);
-    });
-  }
 
   // Lógica de movimiento (tap o arrastre)
   function trySlide(fromPos){
@@ -327,7 +323,7 @@
         const sx = Math.floor((img.width - side)/2);
         const sy = Math.floor((img.height - side)/2);
         const dpr = Math.min(2, window.devicePixelRatio||1);
-        const size = 900*dpr;
+        const size = Math.min(600*dpr, window.innerWidth*1.5);
         const canvas = document.createElement('canvas');
         canvas.width = size; canvas.height = size;
         const ctx = canvas.getContext('2d');
