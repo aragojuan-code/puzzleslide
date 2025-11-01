@@ -431,9 +431,12 @@
     masterVideo.style.display = 'none';
     document.body.appendChild(masterVideo);
 
-    masterVideo.addEventListener('timeupdate', ()=>{
-      if (masterVideo.currentTime >= BOOM_END - 0.02) masterVideo.currentTime = 0.01;
-    });
+   masterVideo.addEventListener('timeupdate', function(e){
+  const v = e.target || this;
+  if (!v) return;
+  if (v.currentTime >= BOOM_END - 0.02) v.currentTime = 0.01;
+});
+
 
     masterVideo.addEventListener('loadedmetadata', ()=>{
       masterVideo.currentTime = 0.01;
