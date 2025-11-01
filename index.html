@@ -40,10 +40,11 @@
     will-change:transform;
     transition:box-shadow .12s ease, background-color .12s ease;
     display:flex; align-items:center; justify-content:center;
-    overflow:hidden;         /* para recortar el vídeo dentro */
+    overflow:hidden;
     touch-action:none;
   }
   .cell.movable{ box-shadow:0 0 0 2px var(--accent) inset }
+
   .grid-overlay{ position:absolute; inset:calc(var(--gap) - 1px); pointer-events:none }
   .gline{ position:absolute; background:var(--grid); border-radius:1px }
   .gv1{ top:0; bottom:0; left:calc(33.333% - .5px); width:1px }
@@ -71,12 +72,13 @@
   }
   .toast.show{ opacity:1 }
 
-  /* VIDEO: estilo del video dentro de cada celda (recortado por posición) */
-  .tileVideo{
-    width:300%; height:300%;        /* equivalente a background-size:300% 300% */
-    object-fit:cover;
-    pointer-events:none;             /* no “roba” el click de la celda */
-    transform-origin:top left;       /* lo veremos con translate() */
+  /* Canvas de vídeo (pintamos todo el tablero en un solo canvas) */
+  #videoCanvas{
+    position:absolute; inset:calc(var(--gap) - 1px);
+    width:calc(100% - 2*(var(--gap) - 1px));
+    height:calc(100% - 2*(var(--gap) - 1px));
+    pointer-events:none;   /* no intercepta clics */
+    border-radius:calc(var(--radius-board) - 2px);
   }
 </style>
 </head>
@@ -93,6 +95,7 @@
   <div class="stage">
     <div class="board-wrap">
       <div id="board" class="board"></div>
+      <canvas id="videoCanvas"></canvas> <!-- <- pintamos vídeo aquí -->
       <div class="grid-overlay">
         <div class="gline gv1"></div><div class="gline gv2"></div>
         <div class="gline gh1"></div><div class="gline gh2"></div>
@@ -116,15 +119,19 @@
   const EMPTY = -1;
   let pos = [0,1,2,3,4,5,6,7,8, EMPTY];
   let moves = 0;
+
   let mediaURL = null;
   let mediaType = null;   // 'image' | 'video'
-  let imageReady = false;
+  let ready = false;
 
-  // VIDEO: maestro oculto y control boomerang
+  // --- VIDEO: maestro + canvas + boomerang ---
+  const vCanvas = document.getElementById('videoCanvas');
+  const vctx = vCanvas.getContext('2d');
   let masterVideo = null;
-  let boomStart = 0, boomEnd = 3;    // 0..3s
+  let boomStart = 0, boomEnd = 3;    // segundos
   let boomReverse = false;
   let rafId = null;
+  let lastDraw = 0;
 
   const boardEl   = document.getElementById('board');
   const dockEl    = document.getElementById('dock');
@@ -150,38 +157,21 @@
     const r = firstCell.getBoundingClientRect();
     dockEl.style.width  = r.width  + 'px';
     dockEl.style.height = r.height + 'px';
+
+    // redimensiona canvas al tamaño interior del board (device pixel ratio)
+    const wrap = boardEl.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    vCanvas.width  = Math.max(1, Math.round(wrap.width  * dpr));
+    vCanvas.height = Math.max(1, Math.round(wrap.height * dpr));
   }
   function safeRender(){ render(); sizeDockToCell(); }
 
   function cellBackground(el, indexValue){
-    // Para IMAGEN: mapea 0..8 a posiciones 0/50/100
     const cx = indexValue % 3, cy = Math.floor(indexValue/3);
     const px = cx===0? '0%' : (cx===1? '50%' : '100%');
     const py = cy===0? '0%' : (cy===1? '50%' : '100%');
     el.style.backgroundImage = `url(${mediaURL})`;
     el.style.backgroundPosition = `${px} ${py}`;
-  }
-
-  function createTileVideo(indexValue){
-    // Crea un <video> que muestra la parte correspondiente del cuadro
-    const v = document.createElement('video');
-    v.className = 'tileVideo';
-    v.src = mediaURL;
-    v.muted = true; v.playsInline = true; v.autoplay = true; v.loop = false; // loop lo hacemos con boomerang
-    // Posicionamiento: traducimos -0%, -50% o -100% para encajar
-    const cx = indexValue % 3, cy = Math.floor(indexValue/3);
-    const tx = cx===0? '0%' : (cx===1? '50%' : '100%');
-    const ty = cy===0? '0%' : (cy===1? '50%' : '100%');
-    // Convertimos a números y les ponemos signo negativo (equivale a background-position)
-    const nx = cx===0? 0 : (cx===1? 0.5 : 1);
-    const ny = cy===0? 0 : (cy===1? 0.5 : 1);
-    v.style.transform = `translate(${-nx*100}%, ${-ny*100}%)`;
-    // Sincronía: al reproducir, lo “engancha” al maestro (si existe)
-    v.addEventListener('loadedmetadata', ()=> {
-      if (masterVideo) v.currentTime = masterVideo.currentTime;
-      v.play().catch(()=>{});
-    });
-    return v;
   }
 
   function render(){
@@ -199,15 +189,9 @@
         cell.style.background = 'rgba(255,255,255,.03)';
         cell.style.outline = '1px dashed rgba(255,255,255,.12)';
         cell.style.outlineOffset = '-6px';
-      } else if(imageReady && mediaURL){
-        if(mediaType === 'image'){
-          cellBackground(cell, val);
-        } else {
-          const vid = createTileVideo(val);
-          cell.appendChild(vid);
-        }
+      } else if(ready && mediaURL && mediaType === 'image'){
+        cellBackground(cell, val);
       }
-
       if(neighbors[i].includes(emptyPos)) cell.classList.add('movable');
       attachSlideHandlers(cell, i);
       boardEl.appendChild(cell);
@@ -216,12 +200,13 @@
     const v9 = pos[9];
     const dockCell = document.createElement('div');
     dockCell.className = 'cell';
-    if(v9 !== EMPTY && imageReady && mediaURL){
-      if(mediaType === 'image'){
+    if(v9 !== EMPTY){
+      if(ready && mediaURL && mediaType === 'image'){
         cellBackground(dockCell, v9);
       } else {
-        const vid = createTileVideo(v9);
-        dockCell.appendChild(vid);
+        dockCell.style.background = 'rgba(255,255,255,.03)';
+        dockCell.style.outline = '1px dashed rgba(255,255,255,.12)';
+        dockCell.style.outlineOffset = '-6px';
       }
     } else {
       dockCell.style.background = 'rgba(255,255,255,.03)';
@@ -232,7 +217,6 @@
     dockEl.appendChild(dockCell);
   }
 
-  // Animación ligera (mueve la celda real)
   function animateSlide(fromPos, toPos, onDone){
     const cells = boardEl.querySelectorAll('.cell');
     const originEl = (fromPos===9)? dockEl.querySelector('.cell') : cells[fromPos];
@@ -255,7 +239,7 @@
   }
 
   function trySlide(fromPos){
-    if(!imageReady || showing) return;
+    if(!ready || showing) return;
     const emptyPos = pos.indexOf(EMPTY);
     if(!neighbors[fromPos].includes(emptyPos)) return;
     animateSlide(fromPos, emptyPos, ()=>{
@@ -289,7 +273,7 @@
 
   function isSolved(){ for(let i=0;i<9;i++) if(pos[i]!==i) return false; return pos[9]===EMPTY; }
   function showToast(){ toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'), 1600); }
-  function checkWin(){ const win = imageReady && isSolved(); if(win){ showToast(); if(navigator.vibrate) navigator.vibrate([20,60,20]); } }
+  function checkWin(){ const win = ready && isSolved(); if(win){ showToast(); if(navigator.vibrate) navigator.vibrate([20,60,20]); } }
 
   function moveEmptyToDock(maxSteps=80){
     let e = pos.indexOf(EMPTY);
@@ -305,7 +289,7 @@
   }
 
   function shuffle(times=160){
-    if(!imageReady) return;
+    if(!ready) return;
     pos = [0,1,2,3,4,5,6,7,8, EMPTY];
     let last = -1;
     for(let k=0;k<times;k++){
@@ -323,7 +307,7 @@
     safeRender(); checkWin();
   }
 
-  // IMAGEN: recorte cuadrado y resize adaptativo
+  // -------- IMAGEN (igual que antes, mejorando nitidez en retina) ----------
   async function loadImage(file){
     return new Promise((resolve,reject)=>{
       const img = new Image();
@@ -347,11 +331,12 @@
     });
   }
 
-  // VIDEO: prepara maestro, boomerang y arranque
+  // -------- VIDEO (un solo <video> + canvas a 30 fps) ----------
   function setupMasterVideo(url){
     if (masterVideo) { cancelAnimationFrame(rafId); masterVideo.pause(); masterVideo.remove(); }
     masterVideo = document.createElement('video');
-    masterVideo.src = url; masterVideo.muted = true; masterVideo.playsInline = true;
+    masterVideo.src = url;
+    masterVideo.muted = true; masterVideo.playsInline = true; masterVideo.preload = 'auto';
     masterVideo.style.display = 'none';
     document.body.appendChild(masterVideo);
 
@@ -360,61 +345,130 @@
       masterVideo.currentTime = 0;
       masterVideo.play().catch(()=>{});
       boomReverse = false;
-      tickBoomerang();
+
+      // Si el navegador soporta frame callback, úsalo, si no 30fps
+      if ('requestVideoFrameCallback' in masterVideo){
+        const step = ()=> {
+          boomerangStep();
+          drawVideoTiles();
+          masterVideo.requestVideoFrameCallback(step);
+        };
+        masterVideo.requestVideoFrameCallback(step);
+      } else {
+        const loop = (t)=>{
+          if (t - lastDraw > 33){ // ~30fps
+            boomerangStep();
+            drawVideoTiles();
+            lastDraw = t;
+          }
+          rafId = requestAnimationFrame(loop);
+        };
+        rafId = requestAnimationFrame(loop);
+      }
     });
   }
-
-  function tickBoomerang(){
-    // Actualiza tiempo del maestro y sincroniza clones
-    const step = 1/60; // ~16ms
+  function boomerangStep(){
+    const dt = 1/60;
     if (!boomReverse){
-      masterVideo.currentTime += step;
-      if (masterVideo.currentTime >= boomEnd){ masterVideo.currentTime = boomEnd; boomReverse = true; }
+      masterVideo.currentTime = Math.min(boomEnd, masterVideo.currentTime + dt);
+      if (masterVideo.currentTime >= boomEnd) boomReverse = true;
     } else {
-      masterVideo.currentTime -= step;
-      if (masterVideo.currentTime <= boomStart){ masterVideo.currentTime = boomStart; boomReverse = false; }
+      masterVideo.currentTime = Math.max(boomStart, masterVideo.currentTime - dt);
+      if (masterVideo.currentTime <= boomStart) boomReverse = false;
     }
-    // Sincroniza visibles (9+1 vídeos)
-    const vids = document.querySelectorAll('.tileVideo');
-    vids.forEach(v => { if (Math.abs(v.currentTime - masterVideo.currentTime) > 0.04) v.currentTime = masterVideo.currentTime; });
-
-    rafId = requestAnimationFrame(tickBoomerang);
   }
 
-  // Cargar archivo (imagen o video)
+  function drawVideoTiles(){
+    if (!masterVideo || masterVideo.readyState < 2) return;
+
+    // fuente cuadrada centrada del vídeo
+    const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
+    if(!vw || !vh) return;
+    const side = Math.min(vw, vh);
+    const sx0 = Math.floor((vw - side)/2);
+    const sy0 = Math.floor((vh - side)/2);
+    const tileSrc = side/3;
+
+    // tamaño del canvas y relación con celdas DOM
+    const dpr = window.devicePixelRatio || 1;
+    const cells = boardEl.querySelectorAll('.cell');
+
+    // Limpia
+    vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+
+    // Dibuja las 9 celdas visibles
+    for (let i=0;i<9;i++){
+      const val = pos[i];
+      if (val === EMPTY) continue;
+
+      const rCell = cells[i].getBoundingClientRect();
+      const rBoard = boardEl.getBoundingClientRect();
+      const x = Math.round((rCell.left - rBoard.left) * dpr);
+      const y = Math.round((rCell.top  - rBoard.top ) * dpr);
+      const w = Math.round(rCell.width  * dpr);
+      const h = Math.round(rCell.height * dpr);
+
+      const cx = val % 3, cy = Math.floor(val/3);
+      const sx = sx0 + cx*tileSrc;
+      const sy = sy0 + cy*tileSrc;
+
+      vctx.drawImage(masterVideo, sx, sy, tileSrc, tileSrc, x, y, w, h);
+    }
+
+    // Dibuja muelle si contiene pieza
+    const val9 = pos[9];
+    if (val9 !== EMPTY){
+      const rDock = dockEl.getBoundingClientRect();
+      const rBoard = boardEl.getBoundingClientRect();
+      const x = Math.round((rDock.left - rBoard.left) * dpr);
+      const y = Math.round((rDock.top  - rBoard.top ) * dpr);
+      const w = Math.round(rDock.width  * dpr);
+      const h = Math.round(rDock.height * dpr);
+
+      const cx = val9 % 3, cy = Math.floor(val9/3);
+      const sx = sx0 + cx*tileSrc;
+      const sy = sy0 + cy*tileSrc;
+
+      vctx.drawImage(masterVideo, sx, sy, tileSrc, tileSrc, x, y, w, h);
+    }
+  }
+
+  // Cargar archivo
   fileInput.addEventListener('change', async (e)=>{
     const file = e.target.files?.[0]; if(!file) return;
     try{
       if (file.type.startsWith('video/')){
         mediaType = 'video';
         mediaURL = URL.createObjectURL(file);
-        setupMasterVideo(mediaURL);             // VIDEO
+        setupMasterVideo(mediaURL);
       } else {
         mediaType = 'image';
-        mediaURL = await loadImage(file);       // IMAGEN
+        mediaURL = await loadImage(file);
       }
-      imageReady = true;
+      ready = true;
       shuffleBtn.disabled = false;
       showBtn.disabled    = false;
       pos = [0,1,2,3,4,5,6,7,8, EMPTY];
       moves = 0; movesEl.textContent = moves;
       safeRender(); shuffle(160);
+      // si es vídeo, pintar la primera imagen ya
+      if (mediaType === 'video') drawVideoTiles();
     }catch(err){ console.error(err); }
   });
 
   // Mezclar
-  document.getElementById('shuffleBtn').addEventListener('click', ()=>shuffle(140));
+  document.getElementById('shuffleBtn').addEventListener('click', ()=>{ shuffle(140); if(mediaType==='video') drawVideoTiles(); });
 
   // Mostrar (pista)
   function showFullImage(){
-    if(!imageReady || showing) return;
+    if(!ready || showing) return;
     savedPos = pos.slice(); showing = true;
     pos = [0,1,2,3,4,5,6,7,8, EMPTY];
-    safeRender();
+    safeRender(); if(mediaType==='video') drawVideoTiles();
   }
   function hideFullImage(){
     if(!showing) return;
-    showing = false; pos = savedPos.slice(); safeRender();
+    showing = false; pos = savedPos.slice(); safeRender(); if(mediaType==='video') drawVideoTiles();
   }
   showBtn.addEventListener('mousedown', showFullImage);
   showBtn.addEventListener('mouseup', hideFullImage);
@@ -423,9 +477,9 @@
   showBtn.addEventListener('touchend', hideFullImage);
   showBtn.addEventListener('touchcancel', hideFullImage);
 
-  // Render inicial y alineación muelle
+  // Inicial
   safeRender();
-  window.addEventListener('resize', sizeDockToCell);
+  window.addEventListener('resize', ()=>{ sizeDockToCell(); if(mediaType==='video') drawVideoTiles(); });
 </script>
 </body>
 </html>
