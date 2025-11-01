@@ -102,6 +102,34 @@
   .cell.movable {
   box-shadow: none !important;
 }
+/* Botones más grandes y visibles */
+button,
+label.btn {
+  padding: 14px 20px;
+  font-size: 17px;
+  border-radius: 14px;
+  font-weight: 600;
+}
+
+/* Ajuste especial para la barra inferior */
+.controls-bottom button {
+  min-width: 120px;
+  font-size: 18px;
+}
+
+/* En móviles: que ocupen todo el ancho y sean más cómodos */
+@media (max-width: 600px) {
+  .controls-bottom {
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+  .controls-bottom button {
+    width: 100%;
+    font-size: 18px;
+    padding: 16px 0;
+  }
+}
 
 </style>
 </head>
