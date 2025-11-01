@@ -322,7 +322,11 @@
         const sx = Math.floor((img.width - side)/2);
         const sy = Math.floor((img.height - side)/2);
         const dpr = Math.min(2, window.devicePixelRatio||1);
-        const size = Math.min(600*dpr, Math.max(540, window.innerWidth*1.5));
+       // Tamaño adaptativo: más resolución en pantallas retina
+let base = 800;
+if (window.innerWidth > 800) base = 900;
+if (window.devicePixelRatio >= 2) base = 1100;
+const size = Math.min(base * dpr, 1400);
         const canvas = document.createElement('canvas');
         canvas.width = size; canvas.height = size;
         const ctx = canvas.getContext('2d');
