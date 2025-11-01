@@ -136,26 +136,33 @@
   let ready = false;
   let drawingSuspended = false;
 
-  // --- VIDEO: maestro + canvas + boomerang optimizado ---
-  const vCanvas = document.getElementById('videoCanvas');
-  const vctx = vCanvas.getContext('2d');
+ // --- VIDEO / BUFFERS ---
+const SRC_SIZE = 640;
 
-  // canvas del muelle
-  const dCanvas = document.getElementById('dockCanvas');
-  const dctx = dCanvas.getContext('2d');
+// Bucle y crossfade
+const BOOM_END = 3;      // segundos de tramo reproducido
+const FADE_MS = 250;    // duración del crossfade en milisegundos
 
-  // buffer de baja resolución
-  const srcCanvas = document.createElement('canvas');
-  const sctx = srcCanvas.getContext('2d', { willReadFrequently: true });
-  const SRC_SIZE = 640;
+// Canvas visibles
+const vCanvas = document.getElementById('videoCanvas');
+const vctx = vCanvas.getContext('2d');
+const dCanvas = document.getElementById('dockCanvas');
+const dctx = dCanvas.getContext('2d');
 
-  // backbuffer para el tablero
-  const backCanvas = document.createElement('canvas');
-  const bctx = backCanvas.getContext('2d');
+// Buffers
+const srcCanvas = document.createElement('canvas');
+const sctx = srcCanvas.getContext('2d', { willReadFrequently: true });
+const backCanvas = document.createElement('canvas');
+const bctx = backCanvas.getContext('2d');
 
-  let masterVideo = null;
-  const BOOM_END = 3; // s
-  let rafId = null;
+// Frame “head” para el crossfade
+const headCanvas = document.createElement('canvas');
+const hctx = headCanvas.getContext('2d');
+let headReady = false;
+
+let masterVideo = null;
+let rafId = null;
+
 
   // layout cacheado
   let layout = null; // {dpr, cells:[...], dock:{x,y,w,h}}
@@ -178,8 +185,8 @@
     8:[5,7,9], 9:[8]
   };
 // arriba (constantes)
-const BOOM_END = 3;
-const FADE_MS = 250;
+
+
 
 // buffers
 const headCanvas = document.createElement('canvas');
@@ -493,31 +500,31 @@ const hctx = headCanvas.getContext('2d');
 }
 
 
- function drawVideoTiles(){
+function drawVideoTiles(){
   if (drawingSuspended) return;
   if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
 
   const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
   if(!vw || !vh) return;
 
-  // --- recorte cuadrado centrado del vídeo ---
+  // recorte cuadrado centrado
   const side = Math.min(vw, vh);
   const sx0 = ((vw - side) / 2) | 0;
   const sy0 = ((vh - side) / 2) | 0;
 
-  // --- volcar frame actual a buffer reducido ---
+  // frame actual -> buffer reducido
   srcCanvas.width = SRC_SIZE;
   srcCanvas.height = SRC_SIZE;
   sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
 
-  // --- preparar backbuffer del tablero ---
+  // preparar backbuffer tablero
   backCanvas.width  = vCanvas.width;
   backCanvas.height = vCanvas.height;
   bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
 
   const ts = SRC_SIZE / 3;
 
-  // --- pintar 9 celdas del tablero con el frame actual ---
+  // 9 celdas (tablero)
   for (let i=0;i<9;i++){
     const val = pos[i];
     if (val === EMPTY) continue;
@@ -526,7 +533,7 @@ const hctx = headCanvas.getContext('2d');
     bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
   }
 
-  // --- CROSSFADE: si estamos al final del tramo, mezclar el frame del inicio encima ---
+  // CROSSFADE al final del tramo
   const t = masterVideo.currentTime;
   if (headReady && t >= BOOM_END - FADE_MS/1000) {
     const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
@@ -542,19 +549,17 @@ const hctx = headCanvas.getContext('2d');
     bctx.restore();
   }
 
-  // --- copiar backbuffer al canvas visible del tablero ---
+  // swap al canvas visible del tablero
   vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
   vctx.drawImage(backCanvas, 0, 0);
 
-  // --- muelle (casilla 10) en su canvas dedicado ---
+  // muelle (casilla 10)
   dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
   const v9 = pos[9];
   if (v9 !== EMPTY){
     const cx = v9 % 3, cy = (v9/3)|0;
-    // frame actual
     dctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
 
-    // crossfade en el muelle también
     if (headReady && t >= BOOM_END - FADE_MS/1000) {
       const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
       dctx.save();
@@ -564,6 +569,7 @@ const hctx = headCanvas.getContext('2d');
     }
   }
 }
+
 
 
   function showFullImage(){
