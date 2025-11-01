@@ -5,10 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FotoSlide 9+1</title>
 <style>
-  :root{
-    --bg:#0f141b; --panel:#121a23; --muted:#9fb3c9; --tile:#101722;
-    --accent:#6ab0ff; --grid:rgba(230,238,247,.18); --gap:8px;
-  }
+ :root{
+  --bg:#0f141b; --panel:#121a23; --muted:#9fb3c9; --tile:#101722;
+  --accent:#6ab0ff; --grid:rgba(230,238,247,.18);
+  --gap:4px;               /* antes 8px */
+  --radius-cell:8px;       /* antes 12px */
+  --radius-board:12px;     /* antes 16px */
+  --cell-border:rgba(255,255,255,.06);  /* más sutil */
+}
+
   html,body{height:100%;margin:0;background:var(--bg);color:#e6eef7;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
   .wrap{max-width:680px;margin:0 auto;padding:16px}
   header{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -26,47 +31,54 @@
   /* Tablero */
   .stage{position:relative;width:100%;max-width:460px;margin:16px auto 10px}
   .board-wrap{position:relative;width:100%;height:420px;aspect-ratio:1/1}
-  .board{
-    position:absolute; inset:0;
-    display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr);
-    gap:var(--gap); padding:var(--gap);
-    background:linear-gradient(180deg,#0b1118,#0e1722);
-    border:1px solid rgba(255,255,255,.06); border-radius:16px;
-  }
-  .cell{
-    border-radius:12px; border:1px solid rgba(255,255,255,.08);
-    background:var(--tile);
-    background-repeat:no-repeat;
-    /* IMPORTANTE: 300% para “recortar” por tercios con background-position */
-    background-size:300% 300%;
-    image-rendering:crisp-edges;
-    will-change:transform;
-    transition:box-shadow .12s ease, background-color .12s ease;
-    display:flex; align-items:center; justify-content:center;
-    touch-action:none; /* gestos sin scroll en móvil */
-  }
+ .board{
+  position:absolute; inset:0;
+  display:grid; grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr);
+  gap:var(--gap);
+  padding:calc(var(--gap) - 1px);      /* reduce el “marco” interno */
+  background:linear-gradient(180deg,#0b1118,#0e1722);
+  border:1px solid rgba(255,255,255,.05);
+  border-radius:var(--radius-board);
+}
+
+.cell{
+  border-radius:var(--radius-cell);
+  border:1px solid var(--cell-border);
+  background:var(--tile);
+  background-repeat:no-repeat;
+  background-size:300% 300%;
+  image-rendering:crisp-edges;
+  will-change:transform;
+  transition:box-shadow .12s ease, background-color .12s ease;
+  display:flex; align-items:center; justify-content:center;
+  touch-action:none;
+}
+
   .cell.movable{ box-shadow:0 0 0 2px var(--accent) inset }
   .cell.flash{ outline:2px solid var(--accent); outline-offset:-2px }
 
   /* Cuadrícula suave */
-  .grid-overlay{ position:absolute; inset:var(--gap); pointer-events:none }
-  .gline{ position:absolute; background:var(--grid); border-radius:2px; filter:blur(.2px) }
-  .gv1{ top:0; bottom:0; left:calc(33.333% - 1px); width:2px }
-  .gv2{ top:0; bottom:0; left:calc(66.666% - 1px); width:2px }
-  .gh1{ left:0; right:0; top:calc(33.333% - 1px); height:2px }
-  .gh2{ left:0; right:0; top:calc(66.666% - 1px); height:2px }
+ .grid-overlay{ position:absolute; inset:calc(var(--gap) - 1px); pointer-events:none }
+.gline{ position:absolute; background:var(--grid); border-radius:1px; }
+.gv1{ top:0; bottom:0; left:calc(33.333% - 0.5px); width:1px }
+.gv2{ top:0; bottom:0; left:calc(66.666% - 0.5px); width:1px }
+.gh1{ left:0; right:0; top:calc(33.333% - 0.5px); height:1px }
+.gh2{ left:0; right:0; top:calc(66.666% - 0.5px); height:1px }
+
 
   /* Barra inferior: botones a la izquierda, muelle a la derecha */
   .bottom-bar{width:100%;max-width:460px;margin:var(--gap) auto 0;display:flex;align-items:center;justify-content:space-between;gap:12px}
   .controls-bottom{display:flex;gap:8px;flex-wrap:wrap}
-  .dock{
-    position:relative;
-    width:120px; height:120px; /* se ajusta por JS al tamaño de celda */
-    border-radius:12px; border:1px solid rgba(255,255,255,.08);
-    background:linear-gradient(180deg,#0b1118,#0e1722);
-    display:flex; align-items:center; justify-content:center;
-  }
-  .dock .cell{ width:100%; height:100%; border:none; border-radius:12px }
+ .dock{
+  position:relative;
+  width:120px; height:120px;  /* JS lo ajusta al tamaño de celda */
+  border-radius:var(--radius-cell);
+  border:1px solid rgba(255,255,255,.06);
+  background:linear-gradient(180deg,#0b1118,#0e1722);
+  display:flex; align-items:center; justify-content:center;
+}
+.dock .cell{ width:100%; height:100%; border:none; border-radius:var(--radius-cell) }
+
 
   /* Mensaje resuelto */
   .toast{
