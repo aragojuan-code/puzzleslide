@@ -102,34 +102,38 @@
   .cell.movable {
   box-shadow: none !important;
 }
-/* Botones más grandes y visibles */
-button,
-label.btn {
-  padding: 14px 20px;
-  font-size: 17px;
-  border-radius: 14px;
-  font-weight: 600;
+/* --- Botones grandes pero en fila --- */
+.controls-bottom{
+  display:flex;
+  flex-direction: row;   /* siempre en fila */
+  flex-wrap: nowrap;     /* no saltan de línea */
+  align-items: center;
+  gap: 10px;
 }
 
-/* Ajuste especial para la barra inferior */
-.controls-bottom button {
-  min-width: 120px;
-  font-size: 18px;
+.controls-bottom button{
+  padding: 12px 16px;    /* un poco más grandes */
+  font-size: 16px;
+  border-radius: 12px;
+  min-width: 110px;      /* consistencia visual */
 }
 
-/* En móviles: que ocupen todo el ancho y sean más cómodos */
-@media (max-width: 600px) {
-  .controls-bottom {
-    flex-direction: column;
-    gap: 10px;
-    width: 100%;
-  }
-  .controls-bottom button {
-    width: 100%;
-    font-size: 18px;
-    padding: 16px 0;
-  }
+/* --- Barra inferior: espacio entre botones y muelle --- */
+.bottom-bar{
+  display:flex;
+  align-items:center;
+  justify-content: space-between; /* botones a la izq, muelle a la dcha */
+  gap: 12px;
 }
+
+/* --- Muelle/celda 10: que NUNCA se deforme --- */
+.dock{
+  flex: 0 0 auto;        /* que no se estire ni comprima por el flex */
+  aspect-ratio: 1 / 1;   /* cuadrado por CSS, por si JS tarda */
+  width: 140px;          /* tamaño inicial (luego JS lo ajusta a la celda) */
+  height: auto;          /* lo fija el aspect-ratio */
+}
+
 
 </style>
 </head>
