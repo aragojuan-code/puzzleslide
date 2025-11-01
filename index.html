@@ -314,9 +314,8 @@ function roundRectPath(ctx, x,y,w,h, r){
 }
 function drawHighlights(){
   if (!layout) return;
+  fctx.clearRect(0,0,fxCanvas.width,fxCanvas.height); // 🔹 limpiar siempre antes
   const dpr = layout.dpr || (window.devicePixelRatio || 1);
-  fctx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
-
   const emptyPos = pos.indexOf(EMPTY);
   if (emptyPos < 0) return;
 
@@ -326,7 +325,6 @@ function drawHighlights(){
   fctx.shadowColor = fctx.strokeStyle;
   fctx.shadowBlur = 1.5*dpr;
 
-  // 9 celdas
   for (let i=0;i<9;i++){
     if (!neighbors[i].includes(emptyPos)) continue;
     const {x,y,w,h} = layout.cells[i];
@@ -334,7 +332,6 @@ function drawHighlights(){
     fctx.stroke();
   }
 
-  // muelle (casilla 10)
   if (neighbors[9].includes(emptyPos)){
     const {x,y,w,h} = layout.dock;
     roundRectPath(fctx, x+1, y+1, w-2, h-2, 10*dpr);
@@ -400,15 +397,16 @@ function drawHighlights(){
   }
 
   /* ---------- Animación de deslizamiento ---------- */
- function animateSlide(fromPos, toPos, onDone){
+function animateSlide(fromPos, toPos, onDone){
   const cells   = boardEl.querySelectorAll('.cell');
   const origin  = (fromPos===9)? dockEl.querySelector('.cell') : cells[fromPos];
   const target  = (toPos===9)?   dockEl.querySelector('.cell') : cells[toPos];
   if(!origin || !target){ onDone(); return; }
 
-  // 1) Quitar los “movable” actuales para evitar duplicados visuales
-  boardEl.querySelectorAll('.cell.movable').forEach(el=>el.classList.remove('movable'));
-  // 2) Silenciar el glow en los dos implicados durante la animación
+  // 🔹 Limpia cualquier highlight previo
+  fctx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
+
+  // 🔹 Silencia el glow durante la animación (evita doble borde)
   origin.classList.add('animating');
   target.classList.add('animating');
 
@@ -421,19 +419,19 @@ function drawHighlights(){
 
   requestAnimationFrame(()=>{
     setTimeout(()=>{
-      // limpiar estilos temporales
       origin.style.transition = '';
       origin.style.transform  = '';
       origin.classList.remove('animating');
       target.classList.remove('animating');
 
       onDone();
-      // Recalcula layout y re-render: aquí se vuelven a marcar los nuevos “movable”
       computeLayout();
       if (mediaType === 'video') drawVideoTiles();
+      else drawHighlights(); // 🔹 repinta bordes correctos una sola vez
     },130);
   });
 }
+
 
 
   function trySlide(fromPos){
