@@ -65,13 +65,24 @@
   .dock .cell{ width:100%; height:100%; border:none; border-radius:var(--radius-cell) }
 
   /* Canvas de vídeo tablero */
-  #videoCanvas{
-    position:absolute; inset:calc(var(--gap) - 1px);
-    width:calc(100% - 2*(var(--gap) - 1px));
-    height:calc(100% - 2*(var(--gap) - 1px));
-    pointer-events:none;
-    border-radius:calc(var(--radius-board) - 2px);
-  }
+ #videoCanvas{
+  position:absolute; inset:calc(var(--gap) - 1px);
+  width:calc(100% - 2*(var(--gap) - 1px));
+  height:calc(100% - 2*(var(--gap) - 1px));
+  pointer-events:none;
+  border-radius:calc(var(--radius-board) - 2px);
+  z-index:2;
+}
+#fxCanvas{
+  position:absolute; inset:calc(var(--gap) - 1px);
+  width:calc(100% - 2*(var(--gap) - 1px));
+  height:calc(100% - 2*(var(--gap) - 1px));
+  pointer-events:none;
+  border-radius:calc(var(--radius-board) - 2px);
+  z-index:3; /* por encima del vídeo */
+}
+.grid-overlay{ z-index:1; } /* opcional: que quede debajo del highlight */
+
   /* Canvas del muelle (casilla 10) */
   #dockCanvas{
     position:absolute; inset:0;
@@ -104,6 +115,8 @@
     <div class="board-wrap">
       <div id="board" class="board"></div>
       <canvas id="videoCanvas"></canvas>
+      <canvas id="fxCanvas"></canvas> <!-- 👈 capa de highlight -->
+      <div class="grid-overlay"> ... </div>
       <div class="grid-overlay">
         <div class="gline gv1"></div><div class="gline gv2"></div>
         <div class="gline gh1"></div><div class="gline gh2"></div>
@@ -143,6 +156,8 @@
   // canvas del muelle
   const dCanvas = document.getElementById('dockCanvas');
   const dctx = dCanvas.getContext('2d');
+  const fxCanvas = document.getElementById('fxCanvas');
+  const fctx = fxCanvas.getContext('2d');
 
   // buffer de baja resolución
   const srcCanvas = document.createElement('canvas');
@@ -203,13 +218,14 @@
     const rB = boardEl.getBoundingClientRect();
 
     // canvas del tablero
-    const newW = Math.max(1, Math.round(rB.width  * dpr));
-    const newH = Math.max(1, Math.round(rB.height * dpr));
-    if (vCanvas.width !== newW || vCanvas.height !== newH) {
-      vCanvas.width  = newW;
-      vCanvas.height = newH;
+   const newW = Math.max(1, Math.round(rB.width  * dpr));
+const newH = Math.max(1, Math.round(rB.height * dpr));
+if (vCanvas.width !== newW || vCanvas.height !== newH) {
+  vCanvas.width = newW; vCanvas.height = newH;
+}
+    if (fxCanvas.width !== newW || fxCanvas.height !== newH) {
+      fxCanvas.width = newW; fxCanvas.height = newH;
     }
-
     // celdas del tablero
     const cellEls = [...boardEl.querySelectorAll('.cell')].slice(0, 9);
     const cells = cellEls.map(el => {
@@ -241,6 +257,45 @@
 
     layout = { dpr, cells, dock };
   }
+function roundRectPath(ctx, x,y,w,h, r){
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y);
+  ctx.arcTo(x+w, y,   x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x,   y+h, rr);
+  ctx.arcTo(x,   y+h, x,   y,   rr);
+  ctx.arcTo(x,   y,   x+w, y,   rr);
+  ctx.closePath();
+}
+function drawHighlights(){
+  if (!layout) return;
+  const dpr = layout.dpr || (window.devicePixelRatio || 1);
+  fctx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
+
+  const emptyPos = pos.indexOf(EMPTY);
+  if (emptyPos < 0) return;
+
+  fctx.lineWidth = Math.max(2, 2*dpr);
+  fctx.strokeStyle = getComputedStyle(document.documentElement)
+                      .getPropertyValue('--accent') || '#6ab0ff';
+  fctx.shadowColor = fctx.strokeStyle;
+  fctx.shadowBlur = 1.5*dpr;
+
+  // 9 celdas
+  for (let i=0;i<9;i++){
+    if (!neighbors[i].includes(emptyPos)) continue;
+    const {x,y,w,h} = layout.cells[i];
+    roundRectPath(fctx, x+1, y+1, w-2, h-2, 10*dpr);
+    fctx.stroke();
+  }
+
+  // muelle (casilla 10)
+  if (neighbors[9].includes(emptyPos)){
+    const {x,y,w,h} = layout.dock;
+    roundRectPath(fctx, x+1, y+1, w-2, h-2, 10*dpr);
+    fctx.stroke();
+  }
+}
 
   function safeRender(){
     drawingSuspended = true;
@@ -250,6 +305,7 @@
     requestAnimationFrame(()=>{
       drawingSuspended = false;
       if (mediaType === 'video') drawVideoTiles();
+      else drawHighlights(); // 👈 para imágenes también
     });
   }
 
@@ -318,6 +374,7 @@
         onDone();
         computeLayout();
         if (mediaType === 'video') drawVideoTiles(); // refrescar dockCanvas
+        drawHighlights();
       },130);
     });
   }
@@ -490,6 +547,7 @@
     vctx.drawImage(backCanvas, 0, 0);
 
     // muelle (casilla 10): se pinta en su canvas dedicado
+    drawHighlights(); // 👈 refresca el borde azul
     dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
     const v9 = pos[9];
     if (v9 !== EMPTY){
