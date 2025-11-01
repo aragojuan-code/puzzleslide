@@ -496,28 +496,48 @@
   }
 
   /* ---------- Carga archivo ---------- */
-  fileInput.addEventListener('change', async (e)=>{
-    const file = e.target.files?.[0]; if(!file) return;
-    try{
-      if (mediaType === 'video' && mediaURL) URL.revokeObjectURL(mediaURL);
+ fileInput.addEventListener('change', async (e)=>{
+  const file = e.target.files?.[0]; 
+  if(!file) return;
 
-      if (file.type.startsWith('video/')){
-        mediaType = 'video';
-        mediaURL = URL.createObjectURL(file);
-        setupMasterVideo(mediaURL);
-      } else {
-        mediaType = 'image';
-        mediaURL = await loadImage(file);
-      }
-      ready = true;
-      shuffleBtn.disabled = false;
-      showBtn.disabled    = false;
-      pos = [0,1,2,3,4,5,6,7,8, EMPTY];
-      moves = 0; movesEl.textContent = moves;
-      safeRender(); shuffle(160);
-      if (mediaType === 'video') drawVideoTiles();
-    }catch(err){ console.error(err); }
-  });
+  try{
+    // 1) Si veníamos de un vídeo, desmonta todo
+    teardownVideo();
+
+    // 2) Libera el ObjectURL anterior si lo había
+    if (mediaURL) {
+      try { URL.revokeObjectURL(mediaURL); } catch(e){}
+    }
+
+    // 3) Carga nueva media
+    if (file.type.startsWith('video/')){
+      mediaType = 'video';
+      mediaURL = URL.createObjectURL(file);
+      setupMasterVideo(mediaURL);
+    } else {
+      mediaType = 'image';
+      mediaURL = await loadImage(file);
+      // Asegura que no queda ningún frame de vídeo visible
+      vctx.clearRect(0,0,vCanvas.width, vCanvas.height);
+      dctx.clearRect(0,0,dCanvas.width, dCanvas.height);
+    }
+
+    // 4) Reset de tablero
+    ready = true;
+    shuffleBtn.disabled = false;
+    showBtn.disabled    = false;
+    pos = [0,1,2,3,4,5,6,7,8, EMPTY];
+    moves = 0; 
+    movesEl.textContent = moves;
+    safeRender(); 
+    shuffle(160);
+    if (mediaType === 'video') drawVideoTiles();
+
+  }catch(err){ 
+    console.error(err); 
+  }
+});
+
 
   /* ---------- Controles ---------- */
   document.getElementById('shuffleBtn').addEventListener('click', ()=>{
@@ -549,6 +569,21 @@
     computeLayout();
     if(mediaType==='video') drawVideoTiles();
   });
+  // 🔧 Mata el vídeo y limpia todo lo relacionado
+function teardownVideo(){
+  try { cancelAnimationFrame(rafId); } catch(e){}
+  if (masterVideo){
+    try { masterVideo.pause(); } catch(e){}
+    // quita handlers para evitar llamadas posteriores
+    masterVideo.src = '';
+    masterVideo.remove();
+    masterVideo = null;
+  }
+  // limpia los canvas donde se pintaba el vídeo
+  vctx.clearRect(0,0,vCanvas.width, vCanvas.height);
+  dctx.clearRect(0,0,dCanvas.width, dCanvas.height);
+}
+
   // ✅ Nueva mejora: pausa y reanuda el video cuando se oculta o vuelve la pestaña
 document.addEventListener('visibilitychange', ()=>{
   if (!masterVideo) return;
