@@ -419,8 +419,9 @@
       img.src = URL.createObjectURL(file);
     });
   }
+// fuera (arriba del file), añade una variable para el final de bucle
+let LOOP_END = 3.0; // se recalcula por vídeo tras loadedmetadata
 
-  /* ---------- Vídeo (setup + crossfade) ---------- */
 function setupMasterVideo(url){
   // Limpieza
   if (masterVideo) {
@@ -437,6 +438,7 @@ function setupMasterVideo(url){
   masterVideo.setAttribute('webkit-playsinline','');
   masterVideo.preload = 'auto';
   masterVideo.loop = false; // lo gestionamos nosotros
+
   // ⚠️ No uses display:none en iOS. Mejor fuera de pantalla:
   Object.assign(masterVideo.style, {
     position:'fixed', left:'-9999px', top:'-9999px',
@@ -444,7 +446,7 @@ function setupMasterVideo(url){
   });
   document.body.appendChild(masterVideo);
 
-  // Preparar headCanvas y capturar frame del inicio
+  // Preparar headCanvas
   headCanvas.width  = SRC_SIZE;
   headCanvas.height = SRC_SIZE;
   headReady = false;
@@ -461,24 +463,34 @@ function setupMasterVideo(url){
     return true;
   };
 
+  // rAF continuo (más fiable en móvil que rVFC)
   const startLoop = ()=>{
-    // bucle continuo con rAF (más fiable en móvil que rVFC)
-    cancelAnimationFrame(rafId);
-    const tick = ()=>{ drawVideoTiles(); rafId = requestAnimationFrame(tick); };
+    try { cancelAnimationFrame(rafId); } catch(e){}
+    const tick = ()=>{
+      // opcional: no dibujar si está en background
+      if (document.visibilityState !== 'hidden') {
+        drawVideoTiles();
+      }
+      rafId = requestAnimationFrame(tick);
+    };
     rafId = requestAnimationFrame(tick);
   };
 
   masterVideo.addEventListener('loadedmetadata', ()=>{
-    // 1) Buscar un primer frame válido
+    // Calcula un loop-end seguro: mínimo entre BOOM_END y (duración - 0.05)
+    const dur = Number.isFinite(masterVideo.duration) ? masterVideo.duration : BOOM_END;
+    LOOP_END = Math.max(0.2, Math.min(BOOM_END, dur - 0.05)); // evita 0 o negativos
+
     const onSeeked = ()=>{
-      captureHead();     // frame del inicio para crossfade
-      masterVideo.play().catch(()=>{});  // reproducir
-      startLoop();       // arrancar bucle continuo
+      captureHead();                 // frame del inicio para crossfade
+      masterVideo.play().catch(()=>{});
+      startLoop();                   // arrancar bucle continuo
     };
     masterVideo.addEventListener('seeked', onSeeked, { once:true });
-    try { masterVideo.currentTime = 0.01; } catch(e) { /* ignora */ }
 
-    // fallback si el seek no llega pero ya se puede pintar:
+    try { masterVideo.currentTime = 0.01; } catch(e) {}
+
+    // Fallback si el seek no llega pero ya se puede pintar
     const onLoadedData = ()=>{
       if (!headReady) captureHead();
       masterVideo.play().catch(()=>{});
@@ -491,112 +503,82 @@ function setupMasterVideo(url){
 
 
 
- function drawVideoTiles(){
+
+function drawVideoTiles(){
   if (drawingSuspended) return;
   if (!masterVideo || masterVideo.readyState < 2 || !layout) return;
 
-  // Boomerang dentro del bucle (evita depender de 'timeupdate')
-  if (masterVideo.currentTime >= BOOM_END - 0.02) {
+  // Boomerang dentro del bucle (más fiable que 'timeupdate' en iOS)
+  if (masterVideo.currentTime >= LOOP_END - 0.02) {
     try { masterVideo.currentTime = 0.01; } catch(e){}
   }
 
   const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
   if(!vw || !vh) return;
 
- 
+  // Recorte cuadrado centrado
+  const side = Math.min(vw, vh);
+  const sx0 = ((vw - side) / 2) | 0;
+  const sy0 = ((vh - side) / 2) | 0;
 
-    // Recorte cuadrado centrado
-    const side = Math.min(vw, vh);
-    const sx0 = ((vw - side) / 2) | 0;
-    const sy0 = ((vh - side) / 2) | 0;
+  // Frame actual -> buffer reducido
+  srcCanvas.width = SRC_SIZE;
+  srcCanvas.height = SRC_SIZE;
+  sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
 
-    // Frame actual -> buffer reducido
-    srcCanvas.width = SRC_SIZE;
-    srcCanvas.height = SRC_SIZE;
-    sctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
+  // Backbuffer tablero
+  backCanvas.width  = vCanvas.width;
+  backCanvas.height = vCanvas.height;
+  bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
 
-    // Backbuffer tablero
-    backCanvas.width  = vCanvas.width;
-    backCanvas.height = vCanvas.height;
-    bctx.clearRect(0,0,backCanvas.width,backCanvas.height);
+  const ts = SRC_SIZE / 3;
 
-    const ts = SRC_SIZE / 3;
+  // Pintar 9 celdas del tablero
+  for (let i=0;i<9;i++){
+    const val = pos[i];
+    if (val === EMPTY) continue;
+    const {x,y,w,h} = layout.cells[i];
+    const cx = val % 3, cy = (val/3)|0;
+    bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+  }
 
-    // Pintar 9 celdas del tablero
+  // Crossfade al final del tramo
+  const t = masterVideo.currentTime;
+  if (headReady && t >= LOOP_END - FADE_MS/1000) {
+    const alpha = Math.min(1, (t - (LOOP_END - FADE_MS/1000)) / (FADE_MS/1000));
+    bctx.save();
+    bctx.globalAlpha = alpha;
     for (let i=0;i<9;i++){
       const val = pos[i];
       if (val === EMPTY) continue;
       const {x,y,w,h} = layout.cells[i];
       const cx = val % 3, cy = (val/3)|0;
-      bctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
+      bctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
     }
-
-    // Crossfade al final del tramo
-    const t = masterVideo.currentTime;
-    if (headReady && t >= BOOM_END - FADE_MS/1000) {
-      const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
-      bctx.save();
-      bctx.globalAlpha = alpha;
-      for (let i=0;i<9;i++){
-        const val = pos[i];
-        if (val === EMPTY) continue;
-        const {x,y,w,h} = layout.cells[i];
-        const cx = val % 3, cy = (val/3)|0;
-        bctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, x, y, w, h);
-      }
-      bctx.restore();
-    }
-
-    // Swap a canvas visible del tablero
-    vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
-    vctx.drawImage(backCanvas, 0, 0);
-
-    // Muelle (casilla 10)
-    dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
-    const v9 = pos[9];
-    if (v9 !== EMPTY){
-      const cx = v9 % 3, cy = (v9/3)|0;
-      dctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
-
-      if (headReady && t >= BOOM_END - FADE_MS/1000) {
-        const alpha = Math.min(1, (t - (BOOM_END - FADE_MS/1000)) / (FADE_MS/1000));
-        dctx.save();
-        dctx.globalAlpha = alpha;
-        dctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
-        dctx.restore();
-      }
-    }
+    bctx.restore();
   }
 
-  /* ---------- Carga archivo ---------- */
-  fileInput.addEventListener('change', async (e)=>{
-    const file = e.target.files?.[0]; if(!file) return;
-    try{
-      if (mediaType === 'video' && mediaURL) URL.revokeObjectURL(mediaURL);
+  // Swap a canvas visible del tablero
+  vctx.clearRect(0,0,vCanvas.width,vCanvas.height);
+  vctx.drawImage(backCanvas, 0, 0);
 
-      if (file.type.startsWith('video/')){
-        mediaType = 'video';
-        mediaURL = URL.createObjectURL(file);
-        setupMasterVideo(mediaURL);
-      } else {
-        mediaType = 'image';
-        mediaURL = await loadImage(file);
-      }
-      ready = true;
-      shuffleBtn.disabled = false;
-      showBtn.disabled    = false;
-      pos = [0,1,2,3,4,5,6,7,8, EMPTY];
-      moves = 0; movesEl.textContent = moves;
-      safeRender(); shuffle(160);
-      if (mediaType === 'video') drawVideoTiles();
-    }catch(err){ console.error(err); }
-  });
+  // Muelle (casilla 10)
+  dctx.clearRect(0,0,dCanvas.width,dCanvas.height);
+  const v9 = pos[9];
+  if (v9 !== EMPTY){
+    const cx = v9 % 3, cy = (v9/3)|0;
+    dctx.drawImage(srcCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
 
-  /* ---------- Controles ---------- */
-  document.getElementById('shuffleBtn').addEventListener('click', ()=>{
-    shuffle(140);
-    if(mediaType==='video') drawVideoTiles();
-  });
+    if (headReady && t >= LOOP_END - FADE_MS/1000) {
+      const alpha = Math.min(1, (t - (LOOP_END - FADE_MS/1000)) / (FADE_MS/1000));
+      dctx.save();
+      dctx.globalAlpha = alpha;
+      dctx.drawImage(headCanvas, cx*ts, cy*ts, ts, ts, 0, 0, dCanvas.width, dCanvas.height);
+      dctx.restore();
+    }
+  }
+}
+
 
   function showFullImage(){
     if(!ready || showing) return;
