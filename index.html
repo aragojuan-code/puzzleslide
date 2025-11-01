@@ -422,11 +422,10 @@
 
   /* ---------- Vídeo (setup + crossfade) ---------- */
 function setupMasterVideo(url){
-  // Limpieza previa
+  // Limpieza
   if (masterVideo) {
     try { cancelAnimationFrame(rafId); } catch(e){}
     try { masterVideo.pause(); } catch(e){}
-    try { URL.revokeObjectURL(mediaURL); } catch(e){}
     masterVideo.remove();
   }
 
@@ -437,31 +436,18 @@ function setupMasterVideo(url){
   masterVideo.setAttribute('playsinline','');
   masterVideo.setAttribute('webkit-playsinline','');
   masterVideo.preload = 'auto';
-  masterVideo.loop = true;
-
-  // ⚠️ NO usar display:none en iOS: mejor fuera de pantalla
+  masterVideo.loop = false; // lo gestionamos nosotros
+  // ⚠️ No uses display:none en iOS. Mejor fuera de pantalla:
   Object.assign(masterVideo.style, {
     position:'fixed', left:'-9999px', top:'-9999px',
     width:'1px', height:'1px', opacity:'0', pointerEvents:'none'
   });
   document.body.appendChild(masterVideo);
 
-  // Bucle suave: salto al inicio justo antes del final
-  masterVideo.addEventListener('timeupdate', ()=>{
-    if (masterVideo.currentTime >= BOOM_END - 0.02) masterVideo.currentTime = 0.01;
-  });
-
-  const startDrawing = ()=>{
-    // Arrancar el bucle de dibujo (rVFC si existe)
-    if ('requestVideoFrameCallback' in masterVideo){
-      const step = ()=>{ drawVideoTiles(); masterVideo.requestVideoFrameCallback(step); };
-      masterVideo.requestVideoFrameCallback(step);
-    } else {
-      let last=0;
-      const loop = (t)=>{ if (t-last>33) { drawVideoTiles(); last=t; } rafId = requestAnimationFrame(loop); };
-      rafId = requestAnimationFrame(loop);
-    }
-  };
+  // Preparar headCanvas y capturar frame del inicio
+  headCanvas.width  = SRC_SIZE;
+  headCanvas.height = SRC_SIZE;
+  headReady = false;
 
   const captureHead = ()=>{
     const vw = masterVideo.videoWidth, vh = masterVideo.videoHeight;
@@ -469,57 +455,40 @@ function setupMasterVideo(url){
     const side = Math.min(vw, vh);
     const sx0 = ((vw - side) / 2) | 0;
     const sy0 = ((vh - side) / 2) | 0;
-    headCanvas.width = SRC_SIZE;
-    headCanvas.height = SRC_SIZE;
     hctx.clearRect(0,0,headCanvas.width,headCanvas.height);
     hctx.drawImage(masterVideo, sx0, sy0, side, side, 0, 0, SRC_SIZE, SRC_SIZE);
     headReady = true;
     return true;
   };
 
-  // Flujo robusto para móvil:
+  const startLoop = ()=>{
+    // bucle continuo con rAF (más fiable en móvil que rVFC)
+    cancelAnimationFrame(rafId);
+    const tick = ()=>{ drawVideoTiles(); rafId = requestAnimationFrame(tick); };
+    rafId = requestAnimationFrame(tick);
+  };
+
   masterVideo.addEventListener('loadedmetadata', ()=>{
-    // En algunos móviles conviene empezar a reproducir primero
-    masterVideo.play().then(()=>{
-      // Esperar a que haya datos decodificados
-      const onLoadedData = ()=>{
-        // Intentar capturar un frame “head”
-        const trySeekAndCapture = ()=>{
-          // iOS permite seek muy corto tras loadeddata
-          const onSeeked = ()=>{
-            captureHead();     // frame inicial para el crossfade
-            startDrawing();    // arrancar render loop
-          };
-          masterVideo.removeEventListener('seeked', onSeeked); // evitar doble
-          masterVideo.addEventListener('seeked', onSeeked, { once:true });
-          try { masterVideo.currentTime = 0.01; } catch(e){ /* algunos Android fallan; no pasa nada */ }
-        };
+    // 1) Buscar un primer frame válido
+    const onSeeked = ()=>{
+      captureHead();     // frame del inicio para crossfade
+      masterVideo.play().catch(()=>{});  // reproducir
+      startLoop();       // arrancar bucle continuo
+    };
+    masterVideo.addEventListener('seeked', onSeeked, { once:true });
+    try { masterVideo.currentTime = 0.01; } catch(e) { /* ignora */ }
 
-        // Si ya podemos capturar sin seek, hazlo; si no, haz seek corto
-        if (!captureHead()) {
-          trySeekAndCapture();
-        } else {
-          startDrawing();
-        }
-      };
-
-      masterVideo.addEventListener('loadeddata', onLoadedData, { once:true });
-      // Fallback si no llega loadeddata pero sí canplay
-      masterVideo.addEventListener('canplay', onLoadedData, { once:true });
-    }).catch(()=>{
-      // Si autoplay falla (por política), al menos intentamos dibujar tras una interacción
-      // (el cambio de archivo suele contar como gesto, pero por si acaso)
-      const resume = ()=>{
-        masterVideo.play().catch(()=>{});
-        startDrawing();
-        window.removeEventListener('touchstart', resume);
-        window.removeEventListener('mousedown', resume);
-      };
-      window.addEventListener('touchstart', resume, { once:true });
-      window.addEventListener('mousedown',  resume, { once:true });
-    });
+    // fallback si el seek no llega pero ya se puede pintar:
+    const onLoadedData = ()=>{
+      if (!headReady) captureHead();
+      masterVideo.play().catch(()=>{});
+      startLoop();
+    };
+    masterVideo.addEventListener('loadeddata', onLoadedData, { once:true });
+    masterVideo.addEventListener('canplay',    onLoadedData, { once:true });
   });
 }
+
 
 
   function drawVideoTiles(){
