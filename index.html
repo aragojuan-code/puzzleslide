@@ -199,35 +199,63 @@
     if(win && navigator.vibrate) navigator.vibrate(60);
   }
 
-  function moveEmptyToDock(maxSteps=50){
-    let e = pos.indexOf(EMPTY);
-    let last = -1;
-    let steps = 0;
-    while(e !== 9 && steps < maxSteps){
-      const neigh = neighbors[e];
-      let next = neigh.includes(9) ? 9 : neigh.find(n => n !== last) ?? neigh[0];
-      [pos[next], pos[e]] = [pos[e], pos[next]];
-      last = e; e = next; steps++;
+  function moveEmptyToDock(maxSteps = 80) {
+  // Si por algún motivo no existe EMPTY en pos, repara y deja el muelle vacío
+  let e = pos.indexOf(EMPTY);
+  if (e === -1) {
+    // Reparación: ponemos el muelle (9) vacío y, si ya había algo ahí, lo
+    // devolvemos a la primera casilla libre (no afecta a la resolubilidad).
+    const was = pos[9];
+    pos[9] = EMPTY;
+    if (was === EMPTY) return;     // ya está reparado
+    // coloca 'was' en la primera posición que no sea EMPTY y esté libre
+    for (let i = 0; i < 9; i++) {
+      if (pos[i] !== EMPTY && pos[i] !== was) continue;
+      if (pos[i] === EMPTY) { pos[i] = was; break; }
     }
+    e = 9; // ahora el hueco está en el muelle
+    return;
   }
 
-  function shuffle(times=160){
-    if(!imageReady) return;
-    pos = [0,1,2,3,4,5,6,7,8, EMPTY];
-    let last = -1;
-    for(let k=0;k<times;k++){
-      const e = pos.indexOf(EMPTY);
-      const neigh = neighbors[e] || [];
-      if(!neigh.length) break;
-      const cands = neigh.filter(n => n!==last);
-      const pick = cands[Math.floor(Math.random()*cands.length)];
-      [pos[pick], pos[e]] = [pos[e], pos[pick]];
-      last = e;
-    }
-    moveEmptyToDock();
-    moves=0; movesEl.textContent=moves;
-    safeRender(); checkWin();
+  // Mueve el hueco (EMPTY) hasta el muelle (9) con pasos legales
+  let last = -1, steps = 0;
+  while (e !== 9 && steps < maxSteps) {
+    const neigh = neighbors[e] || [];
+    if (!neigh.length) break; // seguridad extra
+    const next = neigh.includes(9) ? 9 : (neigh.find(n => n !== last) ?? neigh[0]);
+    [pos[next], pos[e]] = [pos[e], pos[next]];
+    last = e; e = next; steps++;
   }
+}
+
+
+function shuffle(times = 160) {
+  if (!imageReady) return;
+
+  // Estado base: muelle vacío
+  pos = [0,1,2,3,4,5,6,7,8, EMPTY];
+  let last = -1;
+
+  for (let k = 0; k < times; k++) {
+    const e = pos.indexOf(EMPTY);
+    const neigh = neighbors[e] || [];
+    if (!neigh.length) break;
+    const cands = neigh.filter(n => n !== last);
+    const pick = cands[Math.floor(Math.random() * cands.length)];
+    [pos[pick], pos[e]] = [pos[e], pos[pick]];
+    last = e;
+  }
+
+  // Integridad: si por cualquier motivo no hay EMPTY, repónlo en el muelle
+  if (pos.indexOf(EMPTY) === -1) pos[9] = EMPTY;
+
+  // Y fuerza que el hueco termine en el muelle
+  moveEmptyToDock();
+
+  moves = 0; movesEl.textContent = moves;
+  safeRender(); checkWin();
+}
+
 
   async function cropToSquare(file){
     return new Promise((resolve,reject)=>{
